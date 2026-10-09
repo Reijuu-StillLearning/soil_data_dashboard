@@ -17,24 +17,20 @@ st.sidebar.header("Filter Data")
 df_filtered = df.copy()
 
 
-# 1. Filter PT / Estate (Inisialisasi awal df_filtered)
+# 1. Filter pt 
 opsi_estate = df['ESTATE_NAME'].dropna().unique()
 estate = st.sidebar.selectbox("Pilih PT / Estate", opsi_estate)
-# Variabel df_filtered WAJIB diciptakan di sini dari df utama
 df_filtered = df[df['ESTATE_NAME'] == estate] 
 
-# 2. Filter Divisi (Drill-down dari Estate)
+# 2. Filter divisi
 opsi_divisi = df_filtered['DIVISION_NAME'].dropna().unique()
 divisi = st.sidebar.selectbox("Pilih Divisi", opsi_divisi)
 df_filtered = df_filtered[df_filtered['DIVISION_NAME'] == divisi]
 
-# 3. Filter Rentang Tahun
+# 3. Filter range tahun
 min_year, max_year = int(df_filtered['S_YEAR'].min()), int(df_filtered['S_YEAR'].max())
 rentang_tahun = st.sidebar.slider("Rentang Tahun", min_value=min_year, max_value=max_year, value=(min_year, max_year))
 df_filtered = df_filtered[(df_filtered['S_YEAR'] >= rentang_tahun[0]) & (df_filtered['S_YEAR'] <= rentang_tahun[1])]
-
-# Simpan state data level makro untuk fungsi tombol "Unduh CSV" nantinya
-df_divisi = df_filtered.copy()
 
 # 1. Filter E-Block
 opsi_e_block = ["Semua Estate Block"] + list(df_filtered['E_BLOCK_NAME'].dropna().unique())
@@ -42,13 +38,13 @@ pilih_e_block = st.sidebar.selectbox("Pilih Estate Block (Opsional)", opsi_e_blo
 if pilih_e_block != "Semua Estate Block":
     df_filtered = df_filtered[df_filtered['E_BLOCK_NAME'] == pilih_e_block]
 
-# 2. Filter M-Block (Drill-down dari E-Block)
+# 2. Filter M-Block 
 opsi_m_block = ["Semua Manuring Block"] + list(df_filtered['M_BLOCK_NAME'].dropna().unique())
 pilih_m_block = st.sidebar.selectbox("Pilih Manuring Block (Opsional)", opsi_m_block)
 if pilih_m_block != "Semua Manuring Block":
     df_filtered = df_filtered[df_filtered['M_BLOCK_NAME'] == pilih_m_block]
 
-# B. Micro Filters (Drill-down ke level granular)
+# B. Micro Filters 
 opsi_sample = ["Semua Sample"] + list(df_filtered['SAMPLE_ID'].dropna().unique())
 pilih_sample = st.sidebar.selectbox("Pilih Sample ID (Spesifik):", opsi_sample)
 
@@ -63,9 +59,7 @@ if pilih_sample != "Semua Sample":
         
     df_filtered = df_filtered[(df_filtered['S_AREA'] == pilih_area) & (df_filtered['S_DEPTH'] == pilih_depth)]
 
-# ==========================================
-# 2. FEATURE ENGINEERING (DATA BINNING)
-# ==========================================
+# 2. Klasifikasi Data
 labels_cat = ['Extremely Low', 'Very Low', 'Low', 'Marginal', 'Medium', 'High', 'Extremely high']
 kriteria_soil = {
     'S_PH_H2O': [0.0, 3.5, 3.8, 4.0, 4.2, 5.5, 6.5, float('inf')],
@@ -77,69 +71,88 @@ kriteria_soil = {
     'S_CEC': [0.0, 6.0, 9.0, 12.0, 15.0, 18.0, 20.0, float('inf')]
 }
 
-# Batch classification
+bins_ir = [0.0, 8.0, 11.0, 15.0, 20.0, 25.0, 40.0, float('inf')]
+bins_pc = [0.0, 10.0, 20.0, 30.0, 40.0, 60.0, 100.0, float('inf')]
+# Batch klasifikasi
 for col, bins in kriteria_soil.items():
     if col in df_filtered.columns:
         df_filtered[f'{col}_Class'] = pd.cut(df_filtered[col], bins=bins, labels=labels_cat)
 
-# Conditional masking untuk Avail P
+# kondisional klasifikasi area
 if 'S_P_AVAILABLE' in df_filtered.columns and 'S_AREA' in df_filtered.columns:
-    bins_ir = [0.0, 8.0, 11.0, 15.0, 20.0, 25.0, 40.0, float('inf')]
-    bins_pc = [0.0, 10.0, 20.0, 30.0, 40.0, 60.0, 100.0, float('inf')]
+   
     
     mask_ir = df_filtered['S_AREA'] == 'IR'
     mask_pc = df_filtered['S_AREA'] == 'PC'
     df_filtered.loc[mask_ir, 'S_P_AVAILABLE_Class'] = pd.cut(df_filtered.loc[mask_ir, 'S_P_AVAILABLE'], bins=bins_ir, labels=labels_cat)
     df_filtered.loc[mask_pc, 'S_P_AVAILABLE_Class'] = pd.cut(df_filtered.loc[mask_pc, 'S_P_AVAILABLE'], bins=bins_pc, labels=labels_cat)
 
-# ==========================================
-# 3. DYNAMIC UI RENDERING
-# ==========================================
+# 3. ui 
 def render_kpi(col, label, value, category):
     cat = str(category)
     if cat in ['Extremely Low', 'Very Low', 'Low']:
-        # Tanda minus (-) dengan delta normal = MERAH (Panah Bawah)
         col.metric(label, value, f"- {cat}", delta_color="normal")
     elif cat in ['High', 'Extreme', 'Extremely high']:
-        # Delta inverse mengubah teks positif menjadi MERAH (Panah Atas)
         col.metric(label, value, f"{cat}", delta_color="inverse")
     elif cat in ['Marginal', 'Medium']:
-        # Teks positif dengan delta normal = HIJAU (Panah Atas)
         col.metric(label, value, f"{cat}", delta_color="normal")
     else:
-        # Kategori kosong / NaN = ABU-ABU (Tanpa Panah)
         col.metric(label, value, cat, delta_color="off")
 
 if pilih_sample == "Semua Sample":
-    # --- MACRO-ANALYSIS MODE ---
-    st.subheader("Dashboard Analisis Tanah")
-    
+
     # KPI metric
     st.markdown("#### Population Nutrient Summary (Mean)")
-    drop_cols = ['DIVISION_ID', 'E_BLOCK_ID', 'M_BLOCK_ID', 'SAMPLE_ID', 'S_YEAR']
-    df_numeric = df_filtered.select_dtypes(include=['number']).drop(columns=drop_cols, errors='ignore')
+    
+    # 1. filter KPI
+    col_kpi_area, col_kpi_depth = st.columns(2)
+    with col_kpi_area:
+        kpi_area = st.selectbox("Area KPI:", ['PC', 'IR'], index=0)
+    with col_kpi_depth:
+        opsi_depth_bersih = ['0-15', '15-45'] 
+        kpi_depth = st.selectbox("Kedalaman KPI:", opsi_depth_bersih, index=0)
 
-    def get_mean_class(col_name, bins):
-        mean_val = df_numeric[col_name].mean() if col_name in df_numeric.columns else float('nan')
-        if pd.isna(mean_val): return "NaN", "-"
-        cat = pd.cut([mean_val], bins=bins, labels=labels_cat)[0]
-        return round(mean_val, 2), str(cat)
+    df_kpi = df_filtered[
+        (df_filtered['S_AREA'].str.strip().str.upper() == kpi_area) & 
+        (df_filtered['S_DEPTH'].astype(str).str.contains(kpi_depth.split('-')[0]))
+    ]
 
-    mean_ph, cat_ph = get_mean_class('S_PH_H2O', kriteria_soil['S_PH_H2O'])
-    mean_n, cat_n = get_mean_class('S_N', kriteria_soil['S_N'])
-    mean_k, cat_k = get_mean_class('S_EXCHG_K', kriteria_soil['S_EXCHG_K'])
+    # numeric
+    df_kpi_numeric = df_kpi.select_dtypes(include=['number'])
+    def get_mean_class_kpi(col_name, bins):
+        mean_val = df_kpi_numeric[col_name].mean() if col_name in df_kpi_numeric.columns else float('nan')
+        if pd.isna(mean_val) or len(df_kpi) == 0: 
+            return "NaN", "-"
+        
+        try:
+            cat = pd.cut([mean_val], bins=bins, labels=labels_cat)[0]
+            return round(mean_val, 2), str(cat)
+        except:
+            return round(mean_val, 2), "-"
 
-    colA, colB, colC = st.columns(3)
+    mean_ph, cat_ph = get_mean_class_kpi('S_PH_H2O', kriteria_soil['S_PH_H2O'])
+    bins_p_aktif = bins_pc if kpi_area == 'PC' else bins_ir
+    mean_p, cat_p = get_mean_class_kpi('S_P_AVAILABLE', bins_p_aktif)
+    
+    mean_k, cat_k = get_mean_class_kpi('S_EXCHG_K', kriteria_soil['S_EXCHG_K'])
+    mean_mg, cat_mg = get_mean_class_kpi('S_EXCHG_MG', kriteria_soil['S_EXCHG_MG'])
+
+    colA, colB, colC, colD = st.columns(4)
     render_kpi(colA, "Rata-rata pH", mean_ph, cat_ph)
-    render_kpi(colB, "Rata-rata Nitrogen", f"{mean_n} %" if mean_n != "NaN" else "NaN", cat_n)
-    render_kpi(colC, "Rata-rata Kalium", f"{mean_k} %" if mean_k != "NaN" else "NaN", cat_k)
+    render_kpi(colB, "Fosfor (Avail P)", f"{mean_p} ppm" if mean_p != "NaN" else "NaN", cat_p)
+    render_kpi(colC, "Kalium (Exch K)", f"{mean_k} me%" if mean_k != "NaN" else "NaN", cat_k)
+    render_kpi(colD, "Magnesium (Mg)", f"{mean_mg} me%" if mean_mg != "NaN" else "NaN", cat_mg)
 
+    st.caption(f"*Nilai KPI dihitung dari **{len(df_kpi)}** titik sampel.*")
+    
     st.divider()
+
+
 
     # Tren anailisis
     st.subheader("Tren Rata-rata Indikator Tanah")
     
-    # Dropdown pilih feature
+    # pilih feature
     opsi_trend = {
         'pH Level (H2O)': 'S_PH_H2O', 
         'Nitrogen (N)': 'S_N', 
@@ -168,21 +181,35 @@ if pilih_sample == "Semua Sample":
         st.plotly_chart(fig_trend, use_container_width=True)
 
     # Heatmap korelasi 
-    st.subheader("Heatmap Korelasi")
-    if not df_numeric.empty and len(df_numeric) > 1:
+    st.subheader(f"Heatmap Korelasi (Area {kpi_area} | Kedalaman {kpi_depth})")
+    
+    drop_cols_heatmap = ['ESTATE_ID', 'DIVISION_ID', 'E_BLOCK_ID', 'M_BLOCK_ID', 'SAMPLE_ID', 'S_YEAR']
+    df_heatmap = df_kpi.select_dtypes(include=['number']).drop(columns=drop_cols_heatmap, errors='ignore')
+
+    if not df_heatmap.empty and len(df_heatmap) > 1:
         feature_labels = {
-            'S_PH_H2O': 'pH tanah (H₂O)', 'S_N': 'Nitrogen (N)', 
-            'S_P_AVAILABLE': 'Fosfor (P)', 'S_ORG_C': 'Karbon organik', 'S_EXCHG_K': 'Kalium'
+            'S_PH_H2O': 'pH tanah (H₂O)', 
+            'S_N': 'Nitrogen (N)', 
+            'S_P_AVAILABLE': 'Fosfor (P)', 
+            'S_ORG_C': 'Karbon organik', 
+            'S_EXCHG_K': 'Kalium',
+            'S_EXCHG_MG': 'Magnesium' 
         }
-        df_numeric_labeled = df_numeric.rename(columns={col: feature_labels.get(col, col.removeprefix("S_").replace("_", " ").title()) for col in df_numeric.columns})
-        fig_corr = px.imshow(df_numeric_labeled.corr(), text_auto=".1f", aspect="auto", color_continuous_scale='RdBu_r') # type: ignore
+        
+        df_heatmap_labeled = df_heatmap.rename(columns={col: feature_labels.get(col, col.removeprefix("S_").replace("_", " ").title()) for col in df_heatmap.columns})
+        
+        fig_corr = px.imshow(df_heatmap_labeled.corr(), text_auto=".1f", aspect="auto", color_continuous_scale='RdBu_r') # type: ignore
         st.plotly_chart(fig_corr, use_container_width=True)
     else:
-        st.warning("Data tidak cukup untuk merender Correlation Heatmap.")
+        st.warning(f"Data tidak cukup untuk merender Correlation Heatmap pada Area {kpi_area} Kedalaman {kpi_depth}.")
 
     # Data Record
-    st.subheader("Data Record (Essential Features)")
-    kolom_esensial = ['S_YEAR', 'S_DATE', 'E_BLOCK_NAME','M_BLOCK_NAME'] + [col for col in df_filtered.columns if '_Class' in col]
+    st.subheader("Data Record")
+    kolom_esensial = [
+        'S_YEAR', 'S_DATE', 'E_BLOCK_NAME', 'M_BLOCK_NAME', 
+        'SAMPLE_ID', 'S_AREA', 'S_DEPTH'
+    ] + [col for col in df_filtered.columns if '_Class' in col]
+
     st.dataframe(df_filtered[kolom_esensial], use_container_width=True, hide_index=True)
 
 else:
@@ -209,7 +236,7 @@ else:
 
 #download
 st.subheader("Data Export")
-st.caption("Unduh populasi record agronomi untuk {divisi}.")
+
 st.download_button(
     label="Export CSV",
     data=df_filtered.to_csv(index=False).encode('utf-8'),
